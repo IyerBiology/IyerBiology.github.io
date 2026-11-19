@@ -1292,10 +1292,25 @@ function fnv(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);
 async function encodeCode(obj){let b=new TextEncoder().encode(JSON.stringify(obj)),z='0';
   try{if(window.CompressionStream){const st=new Blob([b]).stream().pipeThrough(new CompressionStream('deflate-raw'));b=new Uint8Array(await new Response(st).arrayBuffer());z='1';}}catch(e){}
   let bin='';for(let i=0;i<b.length;i++)bin+=String.fromCharCode(b[i]);return'RM'+z+'.'+btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+/* ---------- Send to my teacher: the form links come from review-submit.js beside this page on the class website ---------- */
+const SUBMIT_MAX=2000;
+const SUBMIT_READY=new Promise(res=>{if(!/^https?:$/.test(location.protocol))return res();const s=document.createElement('script');s.src='review-submit.js';s.onload=s.onerror=()=>res();document.head.appendChild(s);setTimeout(res,6000);});
+function submitLink(key,name,code){const S=window.REVIEW_SUBMIT,t=S&&S[key];if(typeof t!=='string'||!/^https:\/\/[^\s"'<>]+\?[^\s"'<>]+$/.test(t.trim()))return null;
+  const i0=t.trim().indexOf('?'),base=t.trim().slice(0,i0),enc=v=>encodeURIComponent(v);let hasC=false,hasN=false;
+  const parts=t.trim().slice(i0+1).split('&').map(p=>{const i=p.indexOf('=');if(i<0)return p;const k=p.slice(0,i),v=p.slice(i+1);if(v==='NAME'){hasN=true;return k+'='+enc(name);}if(v==='CODE'){hasC=true;return [k,code];}return p;});
+  let url=base+'?'+parts.map(p=>Array.isArray(p)?p[0]+'='+enc(p[1]):p).join('&');
+  if(hasC&&url.length>SUBMIT_MAX){url=base+'?'+parts.filter(p=>!Array.isArray(p)).join('&');hasC=false;}
+  return {url,code:hasC};}
+function sendRow(key,name,ta,codeP){const fb=el('p',{class:'fb',role:'status'}),row=el('div',{class:'noprint',style:'display:none;flex-direction:column;gap:8px'});
+  const a=el('a',{class:'btn',href:'#',target:'_blank',rel:'noopener',id:'sendbtn',style:'text-decoration:none;align-self:flex-start',onclick(){ta.select();try{document.execCommand('copy');}catch(e){}try{if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(ta.value).catch(()=>{});}catch(e){}
+    fb.className='fb good';fb.textContent=a.dataset.code==='1'?'Your teacher’s form opened in a new tab with your name and code filled in. Check them, then tap Submit. If the code box there is empty, paste into it: your code has been copied.':'Your teacher’s form opened in a new tab. Your code has been copied: paste it into the Results code box, then tap Submit.';}},'Send to my teacher');
+  row.append(el('p',{class:'note'},'Opens your teacher’s form with your name and this code filled in. Then tap Submit there. Send again whenever you have done more: your teacher sees your newest results.'),a,fb);
+  Promise.all([codeP,SUBMIT_READY]).then(([c])=>{const s=submitLink(key,name,c);if(!s)return;a.href=s.url;a.dataset.code=s.code?'1':'0';row.style.display='flex';if(TEST)window.__send=s;});
+  return row;}
 function codeCard(){const ta=el('textarea',{class:'codebox',readonly:'readonly','aria-label':'Results code',id:'rcode'},'Preparing…'),fb=el('p',{class:'fb',role:'status'});
-  encodeCode(codeData()).then(c=>{ta.value=c;if(TEST)window.__code=c;});
+  const cp=encodeCode(codeData());cp.then(c=>{ta.value=c;if(TEST)window.__code=c;});const sr=sendRow(UNIT.n,ROOT.users[ROOT.cur].name,ta,cp);
   const b=el('button',{class:'btn alt',type:'button',onclick(){ta.select();let ok=false;try{ok=document.execCommand('copy');}catch(e){}if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(ta.value).then(()=>{fb.className='fb good';fb.textContent='Copied.';},()=>{if(!ok){fb.className='fb warn';fb.textContent='Select the code and copy it.';}});}if(ok){fb.className='fb good';fb.textContent='Copied.';}}},'Copy results code');
-  return card(el('h2',null,'Results code'),el('p',{class:'note'},'Copy this code and hand it in where your teacher asks (for example a form or the class page). Your teacher pastes the codes into the Class Summary file to see results for the whole class. The code contains your name and your answers in this file, and nothing else.'),ta,el('div',{class:'row noprint'},b),fb);}
+  return card(el('h2',null,'Results code'),el('p',{class:'note'},'Copy this code and hand it in where your teacher asks (for example a form or the class page). Your teacher pastes the codes into the Class Summary file to see results for the whole class. The code contains your name and your answers in this file, and nothing else.'),ta,sr,el('div',{class:'row noprint'},b),fb);}
 const pct=(f,t)=>t?Math.round(100*f/t):null,pc=v=>v==null?'–':v+'%';
 function stats(){const o={done:0,atts:0,f1:0,t1:0,fl:0,tl:0,sf:0,st:0,rep:0,g1f:0,g1t:0,glf:0,glt:0};MISSIONS.forEach(m=>{const a=rec(m.id).att;if(!a.length)return;const A=a[0],Z=a[a.length-1];o.done++;o.atts+=a.length;o.f1+=A.f;o.t1+=A.t;o.fl+=Z.f;o.tl+=Z.t;o.sf+=Z.sf;o.st+=Z.st;if(a.length>1){o.rep++;o.g1f+=A.f;o.g1t+=A.t;o.glf+=Z.f;o.glt+=Z.t;}});
   o.pct=pct(o.fl,o.tl);o.growth=o.rep?pct(o.glf,o.glt)-pct(o.g1f,o.g1t):null;return o;}

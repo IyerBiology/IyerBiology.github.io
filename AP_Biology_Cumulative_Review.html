@@ -206,6 +206,21 @@ function finishSet(){const u=U(),S=u.cur;if(!S)return;touched();if(TIMER)clearIn
   if(u.sets.length>60)u.sets.splice(0,u.sets.length-60);u.cur=null;save();location.hash='report';}
 /* ---------- results ---------- */
 function bars(head,rows){return el('div',{class:'scroll'},el('table',null,el('thead',null,el('tr',null,head.map(h=>el('th',null,h)))),el('tbody',null,rows.map(([a,f,t])=>{const p=pct(f,t);return el('tr',null,el('td',null,a),el('td',{class:'num'},f+' / '+t),el('td',null,el('div',{class:'bf'},el('div',{class:'bk',style:'width:'+(p||0)+'%'}))),el('td',{class:'num'},pc(p)));}))));}
+/* ---------- Send to my teacher: the form links come from review-submit.js beside this page on the class website ---------- */
+const SUBMIT_MAX=2000;
+const SUBMIT_READY=new Promise(res=>{if(!/^https?:$/.test(location.protocol))return res();const s=document.createElement('script');s.src='review-submit.js';s.onload=s.onerror=()=>res();document.head.appendChild(s);setTimeout(res,6000);});
+function submitLink(key,name,code){const S=window.REVIEW_SUBMIT,t=S&&S[key];if(typeof t!=='string'||!/^https:\/\/[^\s"'<>]+\?[^\s"'<>]+$/.test(t.trim()))return null;
+  const i0=t.trim().indexOf('?'),base=t.trim().slice(0,i0),enc=v=>encodeURIComponent(v);let hasC=false,hasN=false;
+  const parts=t.trim().slice(i0+1).split('&').map(p=>{const i=p.indexOf('=');if(i<0)return p;const k=p.slice(0,i),v=p.slice(i+1);if(v==='NAME'){hasN=true;return k+'='+enc(name);}if(v==='CODE'){hasC=true;return [k,code];}return p;});
+  let url=base+'?'+parts.map(p=>Array.isArray(p)?p[0]+'='+enc(p[1]):p).join('&');
+  if(hasC&&url.length>SUBMIT_MAX){url=base+'?'+parts.filter(p=>!Array.isArray(p)).join('&');hasC=false;}
+  return {url,code:hasC};}
+function sendRow(key,name,ta,codeP){const fb=el('p',{class:'fb',role:'status'}),row=el('div',{class:'noprint',style:'display:none;flex-direction:column;gap:8px'});
+  const a=el('a',{class:'btn',href:'#',target:'_blank',rel:'noopener',id:'sendbtn',style:'text-decoration:none;align-self:flex-start',onclick(){ta.select();try{document.execCommand('copy');}catch(e){}try{if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(ta.value).catch(()=>{});}catch(e){}
+    fb.className='fb good';fb.textContent=a.dataset.code==='1'?'Your teacher’s form opened in a new tab with your name and code filled in. Check them, then tap Submit. If the code box there is empty, paste into it: your code has been copied.':'Your teacher’s form opened in a new tab. Your code has been copied: paste it into the Results code box, then tap Submit.';}},'Send to my teacher');
+  row.append(el('p',{class:'note'},'Opens your teacher’s form with your name and this code filled in. Then tap Submit there. Send again whenever you have done more: your teacher sees your newest results.'),a,fb);
+  Promise.all([codeP,SUBMIT_READY]).then(([c])=>{const s=submitLink(key,name,c);if(!s)return;a.href=s.url;a.dataset.code=s.code?'1':'0';row.style.display='flex';if(TEST)window.__send=s;});
+  return row;}
 function report(m){const u=U();if(!u.sets.length){m.append(el('section',{class:'card'},el('h2',null,'No sets finished yet'),el('a',{class:'btn',href:'#home'},'Start a set')));return;}
   const last=u.sets[u.sets.length-1],[f,t]=setScore(last),un={},sk={},cf={s:[0,0],u:[0,0]};
   u.sets.forEach(s=>{for(const id in s.res){const b=BYID[id];if(!b)continue;const [ok,,c]=s.res[id];const A=un[b.u]||(un[b.u]=[0,0]);A[0]+=ok;A[1]++;
@@ -217,9 +232,9 @@ function report(m){const u=U();if(!u.sets.length){m.append(el('section',{class:'
     el('h2',{style:'margin-top:14px'},'By skill'),bars(['Science practice','Right','','%'],Object.keys(sk).sort().map(p=>['SP '+p+' '+(SKILL[p]||''),...sk[p]])),
     cf.s[1]+cf.u[1]?el('p',{class:'note'},'When you tapped Sure you were right '+pc(pct(...cf.s))+' of the time; when Not sure, '+pc(pct(...cf.u))+'.'):null));
   const ta=el('textarea',{class:'codebox',readonly:'readonly','aria-label':'Results code',id:'rcode'},'Preparing…'),msg=el('p',{class:'fb',role:'status'});
-  encode(codeData()).then(c=>{ta.value=c;if(TEST)window.__code=c;});
+  const cp=encode(codeData());cp.then(c=>{ta.value=c;if(TEST)window.__code=c;});const sr=sendRow('cum',u.name,ta,cp);
   m.append(el('section',{class:'card'},el('h2',null,'Keep your history safe'),backupRow()));
-  m.append(el('section',{class:'card'},el('h2',null,'Code for my teacher'),el('p',{class:'note'},'Copy this code and send it to your teacher. It contains your name and your answers, nothing else.'),ta,
+  m.append(el('section',{class:'card'},el('h2',null,'Code for my teacher'),el('p',{class:'note'},'Copy this code and send it to your teacher. It contains your name and your answers, nothing else.'),ta,sr,
     el('div',{class:'row noprint'},el('button',{class:'btn',type:'button',onclick(){ta.select();let ok=false;try{ok=document.execCommand('copy');}catch(e){}if(navigator.clipboard)navigator.clipboard.writeText(ta.value).then(()=>{msg.textContent='Copied.';},()=>{});msg.textContent=ok?'Copied.':'Select the code and copy it.';}},'Copy code'),el('button',{class:'btn alt',type:'button',onclick(){window.print();}},'Print')),msg));}
 function checkCode(name,date,done,p){let h=2166136261;const s=['apbio-lab','C',nameKey(name),date,done,p].join('|');for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}return h.toString(36).toUpperCase().padStart(7,'0');}
 function codeData(){const u=U(),d=today(),m={};let F=0,T=0;
