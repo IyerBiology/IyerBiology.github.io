@@ -32,6 +32,10 @@ body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 var(--font)}
 a{color:var(--accent)}
 .top{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line)}
 .brand{font:700 1.05rem var(--display);color:var(--ink);text-decoration:none}
+.crumbs{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;min-width:0}
+.crumb{font-size:.88rem;color:var(--accent);text-decoration:none;white-space:nowrap}
+.crumb:hover,.brand:hover{text-decoration:underline}
+.sep{color:var(--muted);font-size:.88rem}
 #prog{font-size:.85rem;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 main{max-width:760px;margin:0 auto;padding:18px 16px 60px;display:flex;flex-direction:column;gap:16px}
 h1{font:700 1.7rem/1.2 var(--display);margin:0;text-wrap:balance}
@@ -196,7 +200,7 @@ main{max-width:none;padding:0;gap:10px}
 </style>
 </head>
 <body>
-<header class="top"><a class="brand" href="#home">Unit 5 Heredity Review Missions</a><span id="prog"></span></header>
+<header class="top"><nav class="crumbs" aria-label="Go to"><a class="crumb coursehome" href="./">Course home</a><span class="sep coursehome" aria-hidden="true">›</span><a class="brand" href="#home" title="Unit home">Unit 5 Heredity Review Missions</a></nav><span id="prog"></span></header>
 <main id="app"><section class="card" id="nojs"><h2>This page needs a web browser</h2><p>If you can read this, the app you opened it in cannot run the review missions. Open it in Safari, Chrome, Edge or Firefox instead.</p><p><b>From a school app on an iPad or phone:</b> use the app’s ⋯ or Share menu and choose Open in Safari, or Open in browser. If there is no such option, ask your teacher for the web link: on iPads and phones a downloaded copy of this file usually cannot run, but a web link can.</p><p><b>On a computer:</b> save the file, then open it with Chrome, Edge, Firefox or Safari. Always open the same saved copy, so your progress is found again.</p></section></main>
 <script>
 'use strict';
@@ -1270,7 +1274,7 @@ function COURSE_LABEL(n){return 'AP Biology · Unit '+(n==null?UNIT.n:n);}
 window.addEventListener('beforeunload',e=>{if(TEST&&!/[?&]leave=1/.test(location.search))return;if(!SESSION_WORK)return;if(!STORE_OK||needsBackup()){e.preventDefault();e.returnValue='';return'';}});
 function backupRow(){const n=needsBackup();return el('div',{class:'row noprint'},el('a',{class:'btn'+(n?'':' alt'),href:'#backup',style:'text-decoration:none'},n?'Back up my progress':'Back up or restore'),el('span',{class:'note'},'Last backup: '+bkWhen()+(n?'. You have progress since then.':'.')));}
 function finish(host,mid){const r=rec(mid);if(!r.fin){r.att.push(snap(r,today()));if(r.att.length>30)r.att.splice(1,1);r.fin=true;}r.done=true;save();updateProg();const i=MISSIONS.findIndex(m=>m.id===mid),nx=MISSIONS[i+1],a=r.att,Z=a[a.length-1],A=a[0];
-  const c=card(el('h2',null,'Mission complete'),el('p',null,'Attempt '+a.length+': ',el('b',null,Z.f+' of '+Z.t),' correct on the first try'+(Z.t?' ('+pct(Z.f,Z.t)+'%)':'')+'.'+(Z.st?' Free-response parts you awarded yourself: '+Z.sf+' of '+Z.st+'.':'')),a.length>1?el('p',null,'Your first attempt was '+pc(pct(A.f,A.t))+'. Change: '+((pct(Z.f,Z.t)-pct(A.f,A.t))>=0?'+':'')+(pct(Z.f,Z.t)-pct(A.f,A.t))+' percentage points.'):null,el('p',{class:'note'},'Write one sentence in your notes: I used to think… Now I think…'),needsBackup()?backupRow():null,el('div',{class:'row'},nx?el('a',{class:'btn',href:'#'+nx.id,style:'text-decoration:none'},'Next: '+nx.t):null,el('a',{class:'btn alt',href:'#home',style:'text-decoration:none'},'All missions')));
+  const c=card(el('h2',null,'Mission complete'),el('p',null,'Attempt '+a.length+': ',el('b',null,Z.f+' of '+Z.t),' correct on the first try'+(Z.t?' ('+pct(Z.f,Z.t)+'%)':'')+'.'+(Z.st?' Free-response parts you awarded yourself: '+Z.sf+' of '+Z.st+'.':'')),a.length>1?el('p',null,'Your first attempt was '+pc(pct(A.f,A.t))+'. Change: '+((pct(Z.f,Z.t)-pct(A.f,A.t))>=0?'+':'')+(pct(Z.f,Z.t)-pct(A.f,A.t))+' percentage points.'):null,el('p',{class:'note'},'Write one sentence in your notes: I used to think… Now I think…'),needsBackup()?backupRow():null,el('div',{class:'row'},nx?el('a',{class:'btn',href:'#'+nx.id,style:'text-decoration:none'},'Next: '+nx.t):null,el('a',{class:'btn alt',href:'#home',style:'text-decoration:none'},'Unit home'),courseLink()));
   host.append(c);c.scrollIntoView({behavior:reduce?'auto':'smooth',block:'nearest'});}
 function statTiles(o){const g=o.growth;return el('div',{class:'stats'},
   el('div',{class:'stat'},el('b',null,o.done+' of '+MISSIONS.length),el('span',null,'missions completed ('+pct(o.done,MISSIONS.length)+'%)')),
@@ -1294,7 +1298,7 @@ function renderReport(){const u=ROOT.users[ROOT.cur];if(!ROOT.cur){app.append(ca
   breakdownCards().forEach(c=>app.append(c));
   app.append(codeCard());
   app.append(card(el('h2',null,'Check code'),el('p',{class:'code'},code),el('p',{class:'note'},'For the teacher: this code is calculated from the name, the date, the missions completed ('+o.done+') and the percentage ('+p+'%). It can be checked in Teacher notes on the home screen of this file.')));
-  app.append(el('div',{class:'row noprint'},el('button',{class:'btn',type:'button',onclick(){window.print();}},'Print or save as PDF'),el('a',{class:'btn alt',href:'#home',style:'text-decoration:none'},'Back')));
+  app.append(el('div',{class:'row noprint'},el('button',{class:'btn',type:'button',onclick(){window.print();}},'Print or save as PDF'),el('a',{class:'btn alt',href:'#home',style:'text-decoration:none'},'Unit home'),courseLink()));
   app.append(el('p',{class:'note noprint'},'In the print window, choose “Save as PDF” as the printer (on a phone or tablet, use Share or Print and then save to Files).'));}
 function verifier(){const mk=(id,l,ty,w)=>el('label',{style:'display:flex;flex-direction:column;gap:2px;font-size:.8rem'},l,el('input',{id,type:ty,style:'padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;width:'+w}));const out=el('p',{class:'fb',role:'status'});
   return el('div',{style:'display:flex;flex-direction:column;gap:8px;margin-top:8px'},el('h3',null,'Check a report code'),el('div',{class:'row',style:'align-items:flex-end'},mk('vn','Student name','text','11em'),mk('vd','Date (YYYY-MM-DD)','text','8em'),mk('vm','Missions completed','number','6em'),mk('vp','Percent','number','5em')),
@@ -1328,9 +1332,12 @@ function renderHome(){
     el('div',{class:'row'},(()=>{let armed=false;const bt=el('button',{class:'btn alt',type:'button',onclick(){if(!armed){armed=true;bt.textContent='Tap again to erase '+(ROOT.cur?ROOT.users[ROOT.cur].name+'’s':'these')+' results';return;}S={};save();route();}},'Reset progress');return bt;})())));
   app.append(el('details',{class:'card'},el('summary',null,'Teacher notes'),el('div',null,allNotes().map(n=>el('p',null,n)),verifier())));
 }
+const ON_WEB=/^https?:$/.test(location.protocol);
+function courseLink(){return ON_WEB?el('a',{class:'btn alt',href:'./',style:'text-decoration:none'},'Course home'):null;}
 function route(){stopAll();const id=(location.hash||'#home').slice(1),m=MISSIONS.find(x=>x.id===id);app.innerHTML='';const b=envBanner();if(b)app.append(b);
   let fl=null;try{fl=sessionStorage.getItem('__flash');sessionStorage.removeItem('__flash');}catch(e){}if(fl)app.append(el('p',{class:'fb good',role:'status'},fl));
   if(m)renderMission(m);else if(id==='report')renderReport();else if(id==='backup')renderBackup();else renderHome();updateProg();window.scrollTo(0,0);}
+if(!ON_WEB)document.querySelectorAll('.coursehome').forEach(e=>e.remove());
 window.addEventListener('hashchange',route);route();
 </script>
 </body>
