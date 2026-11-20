@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-XOTWHhK1cFlJkkTYX6W5syMye3JtRen29W5vesxeOXA=' 'unsafe-inline' 'self'; style-src 'unsafe-inline'; img-src data: blob:; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Unit 6 Gene Expression Review Missions</title>
 <style>
@@ -255,12 +256,17 @@ function drawChart(cv,o){
 }
 
 /* ---------- shared extras ---------- */
-const TEST=/[?&]test/.test(location.search);
+/* Test mode (answers exposed for scripted tests) works only from a local file or a local test server, and only with exactly
+   test=1. On the class website it is ignored. Test-mode progress is stored apart from real progress, and results codes made
+   in test mode are marked, so the Class Summary flags them. */
+const LOCAL=location.protocol==='file:'||/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const TEST=LOCAL&&/[?&]test=1(?:&|$)/.test(location.search);
 /* ---------- variation: every student profile has a random salt; versions rotate with each completed attempt ---------- */
-const VOFF=parseInt((/[?&]v=(\d+)/.exec(location.search)||[0,0])[1],10)||0;
+const VOFF=TEST?parseInt((/[?&]v=(\d+)/.exec(location.search)||[0,0])[1],10)||0:0;
 function h32(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}return h;}
 function vsalt(){const u=ROOT.users[ROOT.cur];if(!u.salt){u.salt=TEST?'test':Math.random().toString(36).slice(2,10);save();}return u.salt;}
-function vatt(mid){return rec(mid).att.length+VOFF;}
+/* completed attempts: r.n counts every attempt (r.att keeps at most 30), so versions keep rotating after 30 attempts */
+function vatt(mid){const r=rec(mid);return(r.n>=0?r.n:r.att.length)+VOFF;}
 function vrng(mid,id){let a=h32(vsalt()+'|'+mid+'|'+id+'|'+vatt(mid));return()=>{a=(a+0x6D2B79F5)|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 /* vmix scrambles the hash before taking a remainder; without it all two-version questions flipped together (fixed 19 Nov 2026). */
 function vmix(h){h^=h>>>16;h=Math.imul(h,0x85ebca6b);h^=h>>>13;h=Math.imul(h,0xc2b2ae35);h^=h>>>16;return h>>>0;}
@@ -706,12 +712,34 @@ h1:[{id:'xh1',t:'A bacterium becomes resistant to an antibiotic after taking up 
    Original items. They are not College Board questions.
    ===================================================================== */
 const TIPS={Describe:'give the relevant characteristics in specific terms. No reason is needed, but a vague phrase earns nothing.',Explain:'say how or why, linking a cause to its effect. Look for the word “because” in your answer.',Predict:'state one specific outcome, with a direction (increase, decrease, no change).',Justify:'give the evidence and the reasoning that links it to the claim. Restating the prediction is not a justification.',Identify:'name the item precisely. One clear phrase is enough.',State:'a null hypothesis says the independent variable has no effect on the dependent variable. Name both variables.',Calculate:'show the set-up and give the number with its unit.',Determine:'decide from the evidence, and say what the evidence is. For significance, compare the ranges covered by the error bars.','Use the data':'quote the specific values, compare them, and then say whether the hypothesis is supported.'};
+/* FRQ drafts: the written parts and the clock start are kept on this device until the score is recorded, so a page that
+   reloads (iPads reload tabs they have put to sleep) loses nothing. One entry per student, mission, FRQ and attempt; entries
+   older than three weeks are dropped. Saved half a second after typing stops, and when the page is hidden. */
+let FRQFLUSH=null;
+window.addEventListener('pagehide',()=>{try{FRQFLUSH&&FRQFLUSH();}catch(e){}});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')try{FRQFLUSH&&FRQFLUSH();}catch(e){}});
+function frqDraft(mid,P,o){
+  const key=()=>SKEY+'-drafts',id=()=>[ROOT.cur,mid,P,vatt(mid),h32(o.parts.map(p=>p.q).join('|')).toString(36)].join('|');
+  const all=()=>{try{const d=JSON.parse(localStorage.getItem(key())||'{}');return d&&typeof d==='object'&&!Array.isArray(d)?d:{};}catch(e){return{};}};
+  const write=d=>{const now=Date.now();for(const k of Object.keys(d))if(!(d[k]&&now-d[k].at<1814400000))delete d[k];try{localStorage.setItem(key(),JSON.stringify(d));}catch(e){}};
+  let areas=[],start=()=>0,tm=null,dead=false;
+  const D={get(){const d=all()[id()];return d&&Array.isArray(d.t)?d:null;},
+    put(){clearTimeout(tm);if(dead)return;const d=all(),t=areas.map(a=>a.value);if(t.some(v=>v.trim())||start())d[id()]={t,s:start()||0,at:Date.now()};else delete d[id()];write(d);},
+    drop(){clearTimeout(tm);dead=true;const d=all();delete d[id()];write(d);},
+    bind(a,s){areas=a;start=s;FRQFLUSH=D.put;a.forEach(t=>t.addEventListener('input',()=>{clearTimeout(tm);tm=setTimeout(D.put,500);}));}};
+  return D;}
 function frqTask(mid,o,next){
-  const LB=s=>/\(/.test(s)?s:'('+s+')',P=o.pre||'frq',L=o.labels||'abcdefghij'.split('').slice(0,o.parts.length),ID=i=>P+String.fromCharCode(65+i),areas=[],checks=[],cals=[],fb=el('p',{class:'fb',role:'status'}),guide=el('div',{style:'display:none;flex-direction:column;gap:12px'}),out=el('div',{style:'display:flex;flex-direction:column;gap:6px'}),clock=el('b',null,o.minutes+':00');let left=o.minutes*60,id=null,shown=false,gdone=!o.graph;
+  const LB=s=>/\(/.test(s)?s:'('+s+')',P=o.pre||'frq',L=o.labels||'abcdefghij'.split('').slice(0,o.parts.length),ID=i=>P+String.fromCharCode(65+i),areas=[],checks=[],cals=[],fb=el('p',{class:'fb',role:'status'}),guide=el('div',{style:'display:none;flex-direction:column;gap:12px'}),out=el('div',{style:'display:flex;flex-direction:column;gap:6px'}),clock=el('b',null,o.minutes+':00');let left=o.minutes*60,id=null,shown=false,gdone=!o.graph,t0=0,warned=false;
   o.parts.forEach((p,i)=>qmeta(mid,ID(i),o.tag+' · '+p.tag,{kind:'frq',q:LB(L[i])+' '+p.v+' '+p.q,rub:p.rub}));
-  const startB=el('button',{class:'btn alt',type:'button',onclick(){if(id!=null||shown)return;startB.disabled=true;id=every(()=>{left--;const m=Math.max(0,left);clock.textContent=Math.floor(m/60)+':'+String(m%60).padStart(2,'0');if(left===0){fb.className='fb warn';fb.textContent='Time. On the exam you would now move on. Finish your sentence, then open the scoring guide.';}if(left<=0)clearInterval(id);},1000);}},'Start the '+o.minutes+'-minute timer');
+  /* The clock counts real time from its start, so it stays right when the page is put to sleep (iPad app switch, locked screen). */
+  const tick=()=>{left=o.minutes*60-Math.floor((Date.now()-t0)/1000);const m=Math.max(0,left);clock.textContent=Math.floor(m/60)+':'+String(m%60).padStart(2,'0');if(left<=0){if(!warned){warned=true;fb.className='fb warn';fb.textContent='Time. On the exam you would now move on. Finish your sentence, then open the scoring guide.';}if(id!=null)clearInterval(id);}};
+  const startClock=ts=>{if(id!=null||shown)return;t0=ts||Date.now();startB.disabled=true;id=every(tick,1000);tick();};
+  const draft=frqDraft(mid,P,o);
+  const startB=el('button',{class:'btn alt',type:'button',onclick(){startClock();draft.put();}},'Start the '+o.minutes+'-minute timer');
   const partsEl=[];o.parts.forEach((p,i)=>{const ta=el('textarea',{id:P+'-'+i,rows:4,'aria-label':'Your response to part '+L[i]});areas.push(ta);checks.push(false);cals.push(!p.s);partsEl.push(el('div',{class:'frqp'},el('label',{for:P+'-'+i,class:'qt'},LB(L[i])+' ',el('b',null,p.v),' '+p.q),ta));
     if(o.graph&&i===(o.graphAfter||0)){const g=el('div',{class:'frqp'});g.append(el('p',{class:'qt'},'('+(o.graphLabel||'B')+') ',el('b',null,'Construct'),' an appropriate graph of the data. 4 points, checked automatically.'),graphTask(mid,Object.assign({noAnalysis:true},o.graph),()=>{gdone=true;}));partsEl.push(g);}});
+  draft.bind(areas,()=>t0);const dr=draft.get();let restored=null;
+  if(dr){dr.t.forEach((v,i)=>{if(areas[i]&&typeof v==='string')areas[i].value=v.slice(0,20000);});if(dr.s>0)startClock(dr.s);restored=el('p',{class:'fb good',role:'status'},'Your unfinished answer was restored'+(dr.s>0?'. The clock kept counting while you were away':'')+'.');}
   const show=el('button',{class:'btn',type:'button',onclick(){if(shown)return;const sh=areas.findIndex(t=>t.value.trim().length<20);if(sh>=0){fb.className='fb warn';fb.textContent='Write a full response to part '+LB(L[sh])+' before opening the scoring guide. Use sentences, as on the exam.';return;}
     if(!gdone){fb.className='fb warn';fb.textContent='Finish the graph before opening the scoring guide.';return;}
     shown=true;if(id!=null)clearInterval(id);areas.forEach(t=>t.readOnly=true);show.disabled=true;fb.textContent='';guide.style.display='flex';guide.scrollIntoView({behavior:reduce?'auto':'smooth',block:'nearest'});}},'I have finished. Show the scoring guide');
@@ -725,11 +753,11 @@ function frqTask(mid,o,next){
         cal.append(el('div',{class:'smp'},el('p',null,'“'+txt+'”'),row,f2));});box.append(cal);}
     box.append(own);guide.append(box);});
   const recB=el('button',{class:'btn',type:'button',onclick(){if(cals.some(c=>!c)){fb.className='fb warn';fb.textContent='Judge the sample answers for every part first.';guide.append(fb);return;}
-    recB.disabled=true;guide.querySelectorAll('.sel').forEach(b=>b.disabled=true);const got=checks.filter(Boolean).length;o.parts.forEach((p,i)=>mark(mid,ID(i),checks[i]));if(calT)calMark(mid,P,calR,calT);const R0=rec(mid);(R0.fv=R0.fv||{})[P]=o.parts.map(p=>p.v);(R0.fl=R0.fl||{})[P]=L;save();
+    recB.disabled=true;draft.drop();guide.querySelectorAll('.sel').forEach(b=>b.disabled=true);const got=checks.filter(Boolean).length;o.parts.forEach((p,i)=>mark(mid,ID(i),checks[i]));if(calT)calMark(mid,P,calR,calT);const R0=rec(mid);(R0.fv=R0.fv||{})[P]=o.parts.map(p=>p.v);(R0.fl=R0.fl||{})[P]=L;save();
     out.append(el('p',{class:'qt'},'Score: '+got+' of '+o.parts.length+(o.graph?' written points (the graph points were checked automatically)':'')));if(calT)out.append(el('p',null,'Sample answers judged correctly: '+calR+' of '+calT+'.'));o.parts.forEach((p,i)=>{if(!checks[i])out.append(el('p',{class:'note'},LB(L[i])+' '+p.v+': '+(TIPS[p.v]||'')));});
     if(got===o.parts.length)out.append(el('p',{class:'fb good'},'Full marks. Make sure every point is in the words you wrote, not only in your head.'));next();}},'Record my score');
   guide.append(el('p',{class:'note'},'Score strictly. Award a point only if your written response states what the scoring guide requires. Then show your response to a partner or your teacher.'),el('div',{class:'row'},recB),out);
-  return card(el('p',{class:'tag'},o.tag),el('h2',null,(o.long?'Timed long FRQ: ':'Timed short FRQ: ')+o.type),...o.stem.map(s=>el('p',null,s)),o.table&&tbl(o.table[0],o.table.slice(1)),o.table&&el('p',{class:'note'},'Invented data for practice.'),o.src&&el('p',{class:'note'},'Context: '+o.src+'.'),el('p',{class:'note'},o.long?'Answer in sentences. Written parts are worth 1 point each and the graph 4 points (9 in all). You have '+o.minutes+' minutes, as for a long free-response question on the exam.':'Answer in sentences. Each part is worth 1 point. You have '+o.minutes+' minutes, as for a short free-response question on the exam.'),el('div',{class:'row'},startB,el('span',null,'Time left: ',clock)),...partsEl,el('div',{class:'row'},show),fb,guide);
+  return card(el('p',{class:'tag'},o.tag),el('h2',null,(o.long?'Timed long FRQ: ':'Timed short FRQ: ')+o.type),...o.stem.map(s=>el('p',null,s)),o.table&&tbl(o.table[0],o.table.slice(1)),o.table&&el('p',{class:'note'},'Invented data for practice.'),o.src&&el('p',{class:'note'},'Context: '+o.src+'.'),el('p',{class:'note'},o.long?'Answer in sentences. Written parts are worth 1 point each and the graph 4 points (9 in all). You have '+o.minutes+' minutes, as for a long free-response question on the exam.':'Answer in sentences. Each part is worth 1 point. You have '+o.minutes+' minutes, as for a short free-response question on the exam.'),el('div',{class:'row'},startB,el('span',null,'Time left: ',clock)),restored,...partsEl,el('div',{class:'row'},show),fb,guide);
 }
 function overlapQ(o){const G=o.groups,lo=o.means.map((m,i)=>m-2*o.sem[i]),hi=o.means.map((m,i)=>m+2*o.sem[i]),P=[];for(let i=0;i<G.length;i++)for(let j=i+1;j<G.length;j++)P.push([i,j,!(lo[i]<=hi[j]&&lo[j]<=hi[i])]);
   const nm=p=>G[p[0]]+' and '+G[p[1]],list=a=>a.length>1?a.slice(0,-1).join(', ')+' and for '+a[a.length-1]:a[0];
@@ -838,11 +866,11 @@ const EXAMS={
    {v:'State',tag:'SP 3.B',q:'the null hypothesis for this investigation.',rub:'removing sea stars has no effect on the number of species in a plot (there is no difference between the two groups of plots).',no:'a prediction that removal plots will have fewer species.'},
    {v:'Justify',tag:'SP 6.E',q:'the prediction that the plots without sea stars will contain fewer species.',rub:'without its predator the mussel population increases and outcompetes other species for space, so those species decline or disappear.',no:'“because the sea star is a keystone species”, with no mechanism.'}]}}};
 function timedSet(mid,o,next){
-  const n=o.items.length,clock=el('b',null,''),hold=el('div',{style:'display:flex;flex-direction:column;gap:12px'}),fb=el('p',{class:'fb',role:'status'});let left=90*n,id=null,i=0;
+  const n=o.items.length,clock=el('b',null,''),hold=el('div',{style:'display:flex;flex-direction:column;gap:12px'}),fb=el('p',{class:'fb',role:'status'});let left=90*n,id=null,i=0,t0=0;const T0=left;
   const show=()=>{const m=Math.max(0,left);clock.textContent=Math.floor(m/60)+':'+String(m%60).padStart(2,'0');};show();
-  function ask(){if(i>=n){if(id!=null)clearInterval(id);fb.className='fb '+(left>=0?'good':'warn');fb.textContent=left>=0?'Finished inside the time allowed.':'Finished, but over time. On the exam, 90 seconds per question is the pace to hold.';next();return;}
+  function ask(){if(i>=n){if(id!=null)clearInterval(id);if(t0)left=T0-Math.floor((Date.now()-t0)/1000);fb.className='fb '+(left>=0?'good':'warn');fb.textContent=left>=0?'Finished inside the time allowed.':'Finished, but over time. On the exam, 90 seconds per question is the pace to hold.';next();return;}
     const it=o.items[i];hold.append(mcq(mid,{id:'set'+i,tag:'Question '+(i+1)+' of '+n+' · '+o.tag+' · '+it.tag,q:it.q,opts:it.opts,a:it.a,why:it.why,miss:it.m||null,hint:'Go back to the information given.',alts:(SETALT[UNIT.n]||[])[i]&&[(SETALT[UNIT.n]||[])[i]]},()=>{i++;ask();}));}
-  const go=el('button',{class:'btn',type:'button',onclick(){go.disabled=true;id=every(()=>{left--;show();if(left<=-600)clearInterval(id);},1000);ask();}},'Start the questions');
+  const go=el('button',{class:'btn',type:'button',onclick(){go.disabled=true;t0=Date.now();id=every(()=>{left=T0-Math.floor((Date.now()-t0)/1000);show();if(left<=-600)clearInterval(id);},1000);ask();}},'Start the questions');
   return card(el('p',{class:'tag'},o.tag),el('h2',null,'Timed question set'),...o.stem.map(s=>el('p',null,s)),el('p',{class:'note'},'Context: '+o.src+'. The questions are original.'),el('p',{class:'note'},n+' questions at 90 seconds each.'),el('div',{class:'row'},go,el('span',null,'Time left: ',clock)),hold,fb);
 }
 const Q=(tag,q,opts,a,why,m)=>({tag,q,opts,a,why,m});
@@ -1252,13 +1280,50 @@ function u6epi(mid){
    {id:'ep4',tag:TE+' · SP 6.E',q:'Predict: a drug removes the acetyl groups from the histones near an active gene. What happens?',opts:['The DNA sequence of the gene changes.','Transcription increases, because the DNA is freed from the histones.','There is no effect, because only DNA methylation affects transcription.','The chromatin condenses and transcription of the gene decreases.'],a:3,why:'Histone acetylation keeps chromatin loose and accessible. Without the acetyl groups, the chromatin becomes more compact and the gene is transcribed less.',miss:['Histone modification does not change the sequence.','Removing acetyl groups makes chromatin more compact, which reduces access to the DNA.','Histone acetylation also affects transcription.',null]}];
   return[lab,mice,...Q.map(q=>n=>mcq(mid,q,n))];}
 
-/* ---------- routing and home (generic) ---------- */
-const UKEY=KEY+'-users';let ROOT=null;
-try{ROOT=JSON.parse(localStorage.getItem(UKEY));}catch(e){}
-if(!ROOT||!ROOT.users)ROOT={cur:'',users:{'':{name:'',S:S}}};
-if(!ROOT.users[ROOT.cur]){ROOT.cur='';ROOT.users['']=ROOT.users['']||{name:'',S:{}};}
-S=ROOT.users[ROOT.cur].S||(ROOT.users[ROOT.cur].S={});
-function save(){ROOT.users[ROOT.cur].S=S;try{localStorage.setItem(UKEY,JSON.stringify(ROOT));}catch(e){}}
+/* ---------- saved progress: one record per student name on this device ----------
+   Reading: the stored data are checked and repaired field by field, so damaged or hand-edited data cannot stop the page from
+   opening; data that cannot be read at all are copied aside (key ending -damaged) before anything overwrites them.
+   Names are kept in a map without a prototype, so a name such as "constructor" is an ordinary name.
+   Writing: save() first merges what is stored, mission by mission: missions this tab changed are written, the rest are taken
+   from storage, so two tabs of the same page do not erase each other's answers. The student object is updated in place, so
+   screens that hold it stay valid. A failed write shows a warning that cannot be hidden. Test mode uses its own store. */
+const UKEY=KEY+'-users',SKEY=UKEY+(TEST?'-test':''),UF=['salt','noconf','bk','chg'];let ROOT=null,SAVE_FAIL=false,DAMAGED=false;
+const isObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+function dict(o){const d=Object.create(null);if(isObj(o))for(const k of Object.keys(o))d[k]=o[k];return d;}
+function normRec(r){if(!isObj(r))return null;const seen=dict(r.seen);for(const q in seen)seen[q]=seen[q]?1:0;r.seen=seen;
+  r.tried=+r.tried||0;r.first=+r.first||0;r.done=!!r.done;if('fin' in r)r.fin=!!r.fin;if('n' in r&&!(r.n>=0))delete r.n;
+  if('att' in r){if(Array.isArray(r.att))r.att=r.att.filter(isObj).map(a=>({d:String(a.d==null?'':a.d),f:+a.f||0,t:+a.t||0,sf:+a.sf||0,st:+a.st||0}));else delete r.att;}
+  for(const k of ['cf','ch','vk','cal','tg','fv','fl'])if(k in r)r[k]=dict(r[k]);
+  return r;}
+function normS(s){const d=dict();if(isObj(s))for(const k of Object.keys(s)){const r=normRec(s[k]);if(r)d[k]=r;}return d;}
+function normUser(u){if(!isObj(u))return null;const o={name:typeof u.name==='string'?u.name.slice(0,60):'',S:normS(u.S)};
+  if(typeof u.salt==='string'&&u.salt)o.salt=u.salt.slice(0,40);if(u.noconf)o.noconf=true;if(+u.bk>0)o.bk=+u.bk;if(+u.chg>0)o.chg=+u.chg;return o;}
+function normRoot(o){if(!isObj(o)||!isObj(o.users))return null;const users=dict();
+  for(const k of Object.keys(o.users)){const u=normUser(o.users[k]);if(u)users[k]=u;}
+  return{cur:typeof o.cur==='string'&&users[o.cur]?o.cur:'',users};}
+function readStore(){let raw=null;try{raw=localStorage.getItem(SKEY);}catch(e){return null;}if(raw==null)return null;
+  let o=null;try{o=JSON.parse(raw);}catch(e){}const R=normRoot(o);
+  if(!R){DAMAGED=true;try{if(localStorage.getItem(SKEY+'-damaged')!==raw)localStorage.setItem(SKEY+'-damaged',raw);}catch(e){}}
+  return R;}
+function writeStore(){let ok=true;try{localStorage.setItem(SKEY,JSON.stringify(ROOT));}catch(e){ok=false;}
+  if(ok===SAVE_FAIL){SAVE_FAIL=!ok;try{refreshBanner();}catch(e){}}return ok;}
+const emptyRec=r=>!r.done&&!(r.att&&r.att.length)&&!Object.keys(r.seen||{}).length;
+function snapOf(user){const b={m:Object.create(null),u:Object.create(null)};if(user){for(const k of Object.keys(user.S||{}))b.m[k]=JSON.stringify(user.S[k]);for(const f of UF)b.u[f]=JSON.stringify(user[f]);}return b;}
+function merge(st,full){full=Array.isArray(full)?full:[];const cur=ROOT.cur,u=ROOT.users[cur];
+  for(const k of Object.keys(st.users))if(k!==cur&&!full.includes(k))ROOT.users[k]=st.users[k];
+  const t=st.users[cur];if(!t||!u||full.includes(cur))return t||null;
+  for(const k of Object.keys(t.S)){const m=S[k];if(m&&!emptyRec(m)&&JSON.stringify(m)!==BASE.m[k])continue;S[k]=t.S[k];}
+  for(const f of UF){if(f==='salt'){if(t.salt)u.salt=t.salt;continue;}if(f==='bk'||f==='chg'){const v=Math.max(+u[f]||0,+t[f]||0);if(v)u[f]=v;continue;}
+    if(JSON.stringify(u[f])===BASE.u[f]){if(f in t)u[f]=t[f];else delete u[f];}}
+  if(!u.name&&t.name)u.name=t.name;return t;}
+/* full: names whose whole record this tab replaces (a new name, a restore, a reset); they are written as they are here */
+function save(full){const st=readStore();if(st)merge(st,full);ROOT.users[ROOT.cur].S=S;const ok=writeStore();if(ok)BASE=snapOf(ROOT.users[ROOT.cur]);return ok;}
+function useUser(k){ROOT.cur=k;S=ROOT.users[k].S;BASE=snapOf(ROOT.users[k]);}
+if(!isObj(S))S={};
+ROOT=readStore();
+if(!ROOT){ROOT={cur:'',users:dict()};ROOT.users['']={name:'',S:TEST?dict():normS(S)};}
+if(!ROOT.users[ROOT.cur]){ROOT.cur='';if(!ROOT.users[''])ROOT.users['']={name:'',S:dict()};}
+S=ROOT.users[ROOT.cur].S;let BASE=snapOf(ROOT.users[ROOT.cur]);
 function today(){const d=new Date(),z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate());}
 const selfScored=k=>/^(frq|fr2|lfq)[A-J]$/.test(k);
 function snap(r,d){let f=0,t=0,sf=0,st=0;for(const k in r.seen){if(selfScored(k)){st++;sf+=r.seen[k];}else{t++;f+=r.seen[k];}}return{d,f,t,sf,st};}
@@ -1291,7 +1356,7 @@ function breakdownCards(){const B=breakdown(),out=[];
 function codeData(){const u=ROOT.users[ROOT.cur],o=stats(),d=today(),p=o.pct==null?0:o.pct,m={};
   MISSIONS.forEach(M=>{const r=rec(M.id);if(!r.att.length&&!Object.keys(r.seen).length)return;const s={};for(const q in r.seen)s[q]=[r.seen[q],r.ch&&q in r.ch?r.ch[q]:-1,r.vk&&r.vk[q]||0,r.cf&&q in r.cf?r.cf[q]:-1];
     m[M.id]={a:r.att.map(x=>[x.d,x.f,x.t,x.sf,x.st]),s,f:r.fv||{},l:r.fl||{},c:r.cal||{},o:r.fin?0:1};});
-  const out={v:2,k:KEY,u:UNIT.n,n:u.name,d,c:checkCode(u.name,d,o.done,p),m};out.h=fnv('apbio-rm|'+JSON.stringify(out));return out;}
+  const out={v:2,k:KEY,u:UNIT.n,n:u.name,d,t:new Date().toISOString(),c:checkCode(u.name,d,o.done,p),m};if(TEST)out.x=1;out.h=fnv('apbio-rm|'+JSON.stringify(out));return out;}
 function fnv(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}return h.toString(36);}
 async function encodeCode(obj){let b=new TextEncoder().encode(JSON.stringify(obj)),z='0';
   try{if(window.CompressionStream){const st=new Blob([b]).stream().pipeThrough(new CompressionStream('deflate-raw'));b=new Uint8Array(await new Response(st).arrayBuffer());z='1';}}catch(e){}
@@ -1320,31 +1385,42 @@ function stats(){const o={done:0,atts:0,f1:0,t1:0,fl:0,tl:0,sf:0,st:0,rep:0,g1f:
   o.pct=pct(o.fl,o.tl);o.growth=o.rep?pct(o.glf,o.glt)-pct(o.g1f,o.g1t):null;return o;}
 function nameKey(n){return String(n).trim().toLowerCase().replace(/\s+/g,' ');}
 function checkCode(name,date,done,p){let h=2166136261;const s=['apbio-lab',UNIT.n,nameKey(name),date,done,p].join('|');for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0;}return h.toString(36).toUpperCase().padStart(7,'0');}
-function setUser(n){const k=nameKey(n);if(!k)return;if(!ROOT.users[k]){const adopt=ROOT.cur===''&&Object.keys(S).length;ROOT.users[k]={name:String(n).trim().replace(/\s+/g,' ').slice(0,60),S:adopt?S:{}};if(adopt)ROOT.users['']={name:'',S:{}};}ROOT.cur=k;S=ROOT.users[k].S;save();route();}
+function setUser(n){const k=nameKey(n);if(!k)return;let full=[];
+  if(!ROOT.users[k]){const st=readStore();if(st&&st.users[k])ROOT.users[k]=st.users[k];}
+  if(!ROOT.users[k]){const adopt=ROOT.cur===''&&Object.keys(S).length;ROOT.users[k]={name:String(n).trim().replace(/\s+/g,' ').slice(0,60),S:adopt?S:dict()};full=[k];if(adopt){ROOT.users['']={name:'',S:dict()};full.push('');}}
+  useUser(k);save(full);route();}
 /* ---------- keeping progress safe: storage check, in-app viewer warning, backup and restore, leave warning ---------- */
 let SESSION_WORK=false;
 const STORE_OK=(()=>{try{const k='__t'+KEY;localStorage.setItem(k,'1');const ok=localStorage.getItem(k)==='1';localStorage.removeItem(k);return ok;}catch(e){return false;}})();
 const UA=navigator.userAgent||'',IOS=/iPhone|iPad|iPod/.test(UA)||(/Macintosh/.test(UA)&&navigator.maxTouchPoints>1);
 /* in-app viewers: named apps, or an iOS web view that lacks the "Safari/" token every iOS browser (Safari, Chrome, Edge, Firefox) sends */
 const INAPP=(TEST&&/[?&]inapp=1/.test(location.search))||/FBAN|FBAV|Instagram|Line\/|MicroMessenger|wxwork|DingTalk|Lark|Feishu|Teams\/|Snapchat|Twitter|GSA\//i.test(UA)||(IOS&&/AppleWebKit/.test(UA)&&!/Safari\//.test(UA));
-try{if(navigator.storage&&navigator.storage.persist&&location.protocol!=='file:')navigator.storage.persist();}catch(e){}
+try{if(navigator.storage&&navigator.storage.persist&&location.protocol!=='file:')Promise.resolve(navigator.storage.persist()).catch(()=>{});}catch(e){}
 function envBanner(){let off=false;try{off=sessionStorage.getItem('__envok')==='1';}catch(e){}
   const msgs=[];if(!STORE_OK)msgs.push(['Your progress is not being saved in this browser.','This happens in a private window or when website data is blocked. Open the file in a normal window, or make a backup (home screen) before you leave.']);
+  if(STORE_OK&&SAVE_FAIL)msgs.push(['Your latest answers could not be saved.','The browser refused to store them, perhaps because its storage for this site is full. Make a backup now, then close any other tabs of this page.']);
+  if(DAMAGED)msgs.push(['Saved progress in this browser could not be read.','It may have been damaged. A copy was kept on this device. If you have a backup, restore it now.']);
   if(INAPP)msgs.push(['You are in an app’s built-in viewer.','Progress made here can be lost when the app closes. Open this page in Safari or Chrome: use the app’s ⋯ or Share menu and choose Open in Safari or Open in browser.'+(location.protocol==='file:'?' If there is no such option, ask your teacher for the web link.':'')]);
-  if(!msgs.length||off&&STORE_OK)return null;
+  if(!msgs.length||off&&STORE_OK&&!SAVE_FAIL&&!DAMAGED)return null;
   const fb=el('p',{class:'fb',role:'status'}),row=el('div',{class:'row'});
   if(INAPP&&/^https?:$/.test(location.protocol))row.append(el('button',{class:'btn',type:'button',onclick(){const u=location.href.split('#')[0];(navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(u):Promise.reject()).then(()=>{fb.className='fb good';fb.textContent='Link copied. Open Safari or Chrome and paste it into the address bar.';},()=>{fb.className='fb warn';fb.textContent='Copy this link into Safari or Chrome: '+u;});}},'Copy the link'));
-  if(STORE_OK)row.append(el('button',{class:'btn alt',type:'button',onclick(){try{sessionStorage.setItem('__envok','1');}catch(e){}c.remove();}},'Hide this message'));
+  if(SAVE_FAIL||DAMAGED)row.append(el('a',{class:'btn',href:'#backup',style:'text-decoration:none'},'Back up or restore'));
+  if(STORE_OK&&!SAVE_FAIL)row.append(el('button',{class:'btn alt',type:'button',onclick(){try{sessionStorage.setItem('__envok','1');}catch(e){}c.remove();}},'Hide this message'));
   const c=el('section',{class:'card',id:'envwarn',role:'alert',style:'border:2px solid var(--bad)'},...msgs.map(([a,b])=>el('p',null,el('b',null,a),' '+b)),row,fb);return c;}
+function refreshBanner(){const old=document.getElementById('envwarn'),b=envBanner();if(old)old.remove();if(b)app.prepend(b);}
 function needsBackup(){const u=ROOT.users[ROOT.cur];return !!(u.chg&&(!u.bk||u.bk<u.chg));}
 function bkWhen(){const u=ROOT.users[ROOT.cur];if(!u.bk)return 'never';const d=new Date(u.bk),z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+' '+z(d.getHours())+':'+z(d.getMinutes());}
 async function encodeAs(pre,obj){let b=new TextEncoder().encode(JSON.stringify(obj)),z='0';
   try{if(window.CompressionStream){const st=new Blob([b]).stream().pipeThrough(new CompressionStream('deflate-raw'));b=new Uint8Array(await new Response(st).arrayBuffer());z='1';}}catch(e){}
   let bin='';for(let i=0;i<b.length;i++)bin+=String.fromCharCode(b[i]);return pre+z+'.'+btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
-async function decodeAs(pre,code){const m=new RegExp(pre+'([01])\\.([A-Za-z0-9_-]+)').exec(String(code).replace(/\s+/g,''));if(!m)throw new Error('none');
+/* Backups are size-limited before and while they are expanded, so a pasted code or a chosen file cannot freeze the page. */
+async function inflateCapped(u,max){const rd=new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader(),parts=[];let n=0;
+  for(;;){const r=await rd.read();if(r.done)break;n+=r.value.length;if(n>max){try{await rd.cancel();}catch(e){}throw new Error('big');}parts.push(r.value);}
+  const all=new Uint8Array(n);let o=0;for(const p of parts){all.set(p,o);o+=p.length;}return new TextDecoder().decode(all);}
+async function decodeAs(pre,code){code=String(code);if(code.length>2e6)throw new Error('big');const m=new RegExp(pre+'([01])\\.([A-Za-z0-9_-]+)').exec(code.replace(/\s+/g,''));if(!m)throw new Error('none');
   const s=m[2].replace(/-/g,'+').replace(/_/g,'/'),bin=atob(s+'==='.slice((s.length+3)%4)),u=Uint8Array.from(bin,c=>c.charCodeAt(0));
-  if(m[1]==='1'){if(!window.DecompressionStream)throw new Error('old');return JSON.parse(await new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text());}
-  return JSON.parse(new TextDecoder().decode(u));}
+  if(m[1]==='1'){if(!window.DecompressionStream)throw new Error('old');return JSON.parse(await inflateCapped(u,8e6));}
+  if(u.length>8e6)throw new Error('big');return JSON.parse(new TextDecoder().decode(u));}
 function backupData(){const u=ROOT.users[ROOT.cur];const o={v:1,k:KEY,u:UNIT.n,n:u.name||'',d:today(),salt:u.salt||'',nc:u.noconf?1:0,S};o.h=fnv('bk|'+JSON.stringify(o));return o;}
 function renderBackup(){const u=ROOT.users[ROOT.cur],who=u.name||'this device (no name entered)';
   app.append(el('div',null,el('p',{class:'tag'},COURSE_LABEL()+' · keep your progress safe'),el('h1',null,'Back up or restore'),el('p',{class:'lead'},'Student: '+who+'. Last backup: '+bkWhen()+'.')));
@@ -1355,20 +1431,20 @@ function renderBackup(){const u=ROOT.users[ROOT.cur],who=u.name||'this device (n
   const dlB=el('button',{class:'btn alt',type:'button',onclick(){const n=(u.name||'student').replace(/[^A-Za-z0-9]+/g,'_'),a=el('a',{href:URL.createObjectURL(new Blob([code+'\n'],{type:'text/plain'})),download:'Unit'+UNIT.n+'_backup_'+n+'_'+today()+'.txt'});document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},800);done();fb.className='fb good';fb.textContent='Saved as a file. On an iPad or phone it is in the Files app, in Downloads.';}},'Save backup as a file');
   app.append(card(el('h2',null,'Back up my progress'),el('p',null,'Your progress is saved in this browser only. A browser can delete it: when a private window is closed or the browser quits, when website data is cleared, if Safari is not used with this page for about a week, or if you change device or browser. A backup lets you get it back.'),ta,el('div',{class:'row noprint'},copyB,dlB),fb,el('p',{class:'note'},'Back up at the end of each session. The backup contains your name and your answers in this file.')));
   const rin=el('textarea',{class:'codebox','aria-label':'Paste a backup code',id:'bkin',placeholder:'Paste a backup code (it starts with BK1. or BK0.)'}),fin=el('input',{type:'file',accept:'.txt,text/plain',id:'bkfile'}),rfb=el('p',{class:'fb',role:'status'});let armed=null;
-  fin.addEventListener('change',async()=>{const f=fin.files[0];if(f)rin.value=await f.text();});
-  const rb=el('button',{class:'btn',type:'button',async onclick(){let o;try{o=await decodeAs('BK',rin.value);}catch(e){rfb.className='fb bad';rfb.textContent=e.message==='old'?'This browser cannot read compressed backups. Restore in an up-to-date browser.':'That is not a complete backup code. Copy all of it, or choose the backup file.';return;}
+  fin.addEventListener('change',async()=>{const f=fin.files[0];if(!f)return;if(f.size>2e6){rfb.className='fb bad';rfb.textContent='That file is far too large to be a backup from this page.';return;}rin.value=await f.text();});
+  const rb=el('button',{class:'btn',type:'button',async onclick(){let o;try{o=await decodeAs('BK',rin.value);}catch(e){rfb.className='fb bad';rfb.textContent=e.message==='big'?'That is far too long to be a backup code from this page.':e.message==='old'?'This browser cannot read compressed backups. Restore in an up-to-date browser.':'That is not a complete backup code. Copy all of it, or choose the backup file.';return;}
     if(o.k!==KEY||String(o.u)!==String(UNIT.n)){rfb.className='fb bad';rfb.textContent='This backup is from a different file ('+COURSE_LABEL(o.u)+'). Open that file to restore it.';return;}
     const h=o.h;delete o.h;if(fnv('bk|'+JSON.stringify(o))!==h){rfb.className='fb bad';rfb.textContent='This backup code has been changed, so it cannot be restored.';return;}
     const k=nameKey(o.n||''),ex=ROOT.users[k],has=ex&&ex.S&&Object.keys(ex.S).length;
     if(has&&armed!==rin.value){armed=rin.value;rfb.className='fb warn';rfb.textContent='This device already has results for '+(o.n||'this device')+'. Tap Restore again to replace them with the backup from '+o.d+'.';return;}
-    ROOT.users[k]={name:o.n||'',salt:o.salt,S:o.S,noconf:!!o.nc,bk:Date.now()};ROOT.cur=k;S=ROOT.users[k].S;save();try{sessionStorage.setItem('__flash','Restored the backup from '+o.d+(o.n?' for '+o.n:'')+'.');}catch(e){}if(location.hash==='#home')route();else location.hash='#home';}},'Restore');
+    const R=normUser({name:o.n||'',salt:o.salt,S:o.S,noconf:!!o.nc,bk:Date.now()});if(!R||!isObj(o.S)){rfb.className='fb bad';rfb.textContent='That is not a complete backup code. Copy all of it, or choose the backup file.';return;}ROOT.users[k]=R;useUser(k);save([k]);try{sessionStorage.setItem('__flash','Restored the backup from '+o.d+(o.n?' for '+o.n:'')+'.');}catch(e){}if(location.hash==='#home')route();else location.hash='#home';}},'Restore');
   app.append(card(el('h2',null,'Restore from a backup'),el('p',null,'Paste a backup code, or choose a backup file, then tap Restore. Use this after your browser lost your progress, or to move to another device.'),rin,el('div',{class:'row'},el('label',{for:'bkfile',class:'note'},'Backup file: ',fin)),el('div',{class:'row'},rb),rfb));
   app.append(el('div',{class:'row noprint'},el('a',{class:'btn alt',href:'#home',style:'text-decoration:none'},'Back')));}
 function COURSE_LABEL(n){return 'AP Biology · Unit '+(n==null?UNIT.n:n);}
-window.addEventListener('beforeunload',e=>{if(TEST&&!/[?&]leave=1/.test(location.search))return;if(!SESSION_WORK)return;if(!STORE_OK||needsBackup()){e.preventDefault();e.returnValue='';return'';}});
+window.addEventListener('beforeunload',e=>{if(TEST&&!/[?&]leave=1/.test(location.search))return;if(!SESSION_WORK)return;if(!STORE_OK||SAVE_FAIL||needsBackup()){e.preventDefault();e.returnValue='';return'';}});
 function backupRow(){const n=needsBackup();return el('div',{class:'row noprint'},el('a',{class:'btn'+(n?'':' alt'),href:'#backup',style:'text-decoration:none'},n?'Back up my progress':'Back up or restore'),el('span',{class:'note'},'Last backup: '+bkWhen()+(n?'. You have progress since then.':'.')));}
-function finish(host,mid){const r=rec(mid);if(!r.fin){r.att.push(snap(r,today()));if(r.att.length>30)r.att.splice(1,1);r.fin=true;}r.done=true;save();updateProg();const i=MISSIONS.findIndex(m=>m.id===mid),nx=MISSIONS[i+1],a=r.att,Z=a[a.length-1],A=a[0];
-  const c=card(el('h2',null,'Mission complete'),el('p',null,'Attempt '+a.length+': ',el('b',null,Z.f+' of '+Z.t),' correct on the first try'+(Z.t?' ('+pct(Z.f,Z.t)+'%)':'')+'.'+(Z.st?' Free-response parts you awarded yourself: '+Z.sf+' of '+Z.st+'.':'')),a.length>1?el('p',null,'Your first attempt was '+pc(pct(A.f,A.t))+'. Change: '+((pct(Z.f,Z.t)-pct(A.f,A.t))>=0?'+':'')+(pct(Z.f,Z.t)-pct(A.f,A.t))+' percentage points.'):null,el('p',{class:'note'},'Write one sentence in your notes: I used to think… Now I think…'),needsBackup()?backupRow():null,el('div',{class:'row'},nx?el('a',{class:'btn',href:'#'+nx.id,style:'text-decoration:none'},'Next: '+nx.t):null,el('a',{class:'btn alt',href:'#home',style:'text-decoration:none'},'Unit home'),courseLink()));
+function finish(host,mid){const r=rec(mid);if(!r.fin){r.n=(r.n>=0?r.n:r.att.length)+1;r.att.push(snap(r,today()));if(r.att.length>30)r.att.splice(1,1);r.fin=true;}r.done=true;save();updateProg();const i=MISSIONS.findIndex(m=>m.id===mid),nx=MISSIONS[i+1],a=r.att,Z=a[a.length-1],A=a[0];
+  const c=card(el('h2',null,'Mission complete'),el('p',null,'Attempt '+(r.n||a.length)+': ',el('b',null,Z.f+' of '+Z.t),' correct on the first try'+(Z.t?' ('+pct(Z.f,Z.t)+'%)':'')+'.'+(Z.st?' Free-response parts you awarded yourself: '+Z.sf+' of '+Z.st+'.':'')),a.length>1?el('p',null,'Your first attempt was '+pc(pct(A.f,A.t))+'. Change: '+((pct(Z.f,Z.t)-pct(A.f,A.t))>=0?'+':'')+(pct(Z.f,Z.t)-pct(A.f,A.t))+' percentage points.'):null,el('p',{class:'note'},'Write one sentence in your notes: I used to think… Now I think…'),needsBackup()?backupRow():null,el('div',{class:'row'},nx?el('a',{class:'btn',href:'#'+nx.id,style:'text-decoration:none'},'Next: '+nx.t):null,el('a',{class:'btn alt',href:'#home',style:'text-decoration:none'},'Unit home'),courseLink()));
   host.append(c);c.scrollIntoView({behavior:reduce?'auto':'smooth',block:'nearest'});}
 function statTiles(o){const g=o.growth;return el('div',{class:'stats'},
   el('div',{class:'stat'},el('b',null,o.done+' of '+MISSIONS.length),el('span',null,'missions completed ('+pct(o.done,MISSIONS.length)+'%)')),
@@ -1378,7 +1454,7 @@ function statTiles(o){const g=o.growth;return el('div',{class:'stats'},
 function attTable(full){const rows=MISSIONS.map(m=>{const a=rec(m.id).att,A=a[0],Z=a[a.length-1],best=a.length?Math.max(...a.map(x=>pct(x.f,x.t)||0)):null;return el('tr',null,el('td',null,(m.id==='exam'||m.id==='long'?'':m.topic+' ')+m.t),full?el('td',{class:'num'},a.length?(Z.d||'earlier'):'not completed'):null,el('td',{class:'num'},String(a.length)),el('td',{class:'num'},a.length?pc(pct(A.f,A.t)):'–'),el('td',{class:'num'},a.length?pc(pct(Z.f,Z.t)):'–'),el('td',{class:'num'},pc(best)));});
   return el('div',{class:'scroll'},el('table',null,el('thead',null,el('tr',null,...(full?['Mission','Last completed','Attempts','First','Latest','Best']:['Mission','Attempts','First','Latest','Best']).map(h=>el('th',null,h)))),el('tbody',null,rows)));}
 function resultsCard(){const u=ROOT.users[ROOT.cur],o=stats(),inp=el('input',{type:'text',id:'sname',maxlength:60,autocomplete:'off',style:'flex:1;min-width:0;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit'});
-  const who=ROOT.cur?el('div',{class:'row'},el('span',null,'Student: ',el('b',null,u.name)),el('button',{class:'btn alt',type:'button',onclick(){ROOT.cur='';if(!ROOT.users[''])ROOT.users['']={name:'',S:{}};S=ROOT.users[''].S;save();route();}},'Switch student'))
+  const who=ROOT.cur?el('div',{class:'row'},el('span',null,'Student: ',el('b',null,u.name)),el('button',{class:'btn alt',type:'button',onclick(){if(!ROOT.users[''])ROOT.users['']={name:'',S:dict()};useUser('');save();route();}},'Switch student'))
     :el('div',null,el('label',{for:'sname',class:'qt'},'Your name, as your teacher knows it'),el('div',{class:'row',style:'margin-top:6px'},inp,el('button',{class:'btn',type:'button',onclick(){setUser(inp.value);}},'Save name')),el('p',{class:'note',style:'margin-top:6px'},'Enter your name to keep your own record on this device and to print a report. If you used this device before, type the same name to load your results.'));
   return card(el('h2',null,'My results'),who,backupRow(),statTiles(o),attTable(false),...(()=>{const B=breakdown(),sk=Object.keys(B.sp).filter(p=>B.sp[p][1]>=3).sort((a,b)=>B.sp[a][0]/B.sp[a][1]-B.sp[b][0]/B.sp[b][1]);return sk.length?[el('p',null,'Weakest skill so far: ',el('b',null,(SPN[sk[0]]?sk[0]+' '+SPN[sk[0]]:'Practice '+sk[0])),' ('+pc(pct(B.sp[sk[0]][0],B.sp[sk[0]][1]))+'). The report shows every skill and topic.')]:[];})(),o.st?el('p',null,'Free-response parts (scored by you): '+o.sf+' of '+o.st+'. These are not included in the percentage.'):null,
     el('p',{class:'note'},'Percentages count only questions marked automatically, on the first try. Open a completed mission and answer again to start a new attempt.'),
@@ -1423,15 +1499,26 @@ function renderHome(){
   app.append(card(el('h2',null,'Progress and curriculum map'),el('div',{class:'scroll'},el('table',null,el('thead',null,el('tr',null,...['Topic','Mission','Learning objectives','Big Idea','Science practice','Latest'].map(h=>el('th',null,h)))),el('tbody',null,rows))),
     frqLine(),
     el('p',{class:'note'},'Results and the name you enter are kept only in this browser on this device. Nothing is sent anywhere.'),
-    el('div',{class:'row'},(()=>{let armed=false;const bt=el('button',{class:'btn alt',type:'button',onclick(){if(!armed){armed=true;bt.textContent='Tap again to erase '+(ROOT.cur?ROOT.users[ROOT.cur].name+'’s':'these')+' results';return;}S={};save();route();}},'Reset progress');return bt;})())));
+    el('div',{class:'row'},(()=>{let armed=false;const bt=el('button',{class:'btn alt',type:'button',onclick(){if(!armed){armed=true;bt.textContent='Tap again to erase '+(ROOT.cur?ROOT.users[ROOT.cur].name+'’s':'these')+' results';return;}S=dict();ROOT.users[ROOT.cur].S=S;save([ROOT.cur]);route();}},'Reset progress');return bt;})())));
   app.append(el('details',{class:'card'},el('summary',null,'Teacher notes'),el('div',null,allNotes().map(n=>el('p',null,n)),verifier())));
 }
 const ON_WEB=/^https?:$/.test(location.protocol);
 function courseLink(){return ON_WEB?el('a',{class:'btn alt',href:'./',style:'text-decoration:none'},'Course home'):null;}
 function route(){stopAll();const id=(location.hash||'#home').slice(1),m=MISSIONS.find(x=>x.id===id);app.innerHTML='';const b=envBanner();if(b)app.append(b);
   let fl=null;try{fl=sessionStorage.getItem('__flash');sessionStorage.removeItem('__flash');}catch(e){}if(fl)app.append(el('p',{class:'fb good',role:'status'},fl));
-  if(m)renderMission(m);else if(id==='report')renderReport();else if(id==='backup')renderBackup();else renderHome();updateProg();window.scrollTo(0,0);}
+  FAULTED=false;try{if(m)renderMission(m);else if(id==='report')renderReport();else if(id==='backup')renderBackup();else renderHome();}catch(e){showFault(e);}
+  try{updateProg();}catch(e){}window.scrollTo(0,0);}
 if(!ON_WEB)document.querySelectorAll('.coursehome').forEach(e=>e.remove());
+/* ---------- when something goes wrong: a message instead of a blank page; saved progress is untouched ----------
+   Another tab of this page saved: take its changes in, and redraw the home screen or report if one is showing. */
+let FAULTED=false;
+function showFault(e){const hw=(typeof COURSE!=='undefined'&&COURSE.unitWord?COURSE.unitWord:'Unit')+' home';
+  app.append(card(el('h2',null,'Something went wrong on this screen'),el('p',null,'Your saved progress has not been changed. Go back to the home screen and try again. If it happens again, make a backup and tell your teacher which screen it was.'),el('p',{class:'note'},'Details: '+String(e&&e.message||e).slice(0,200)),el('div',{class:'row'},el('a',{class:'btn',href:'#home',style:'text-decoration:none'},hw),el('a',{class:'btn alt',href:'#backup',style:'text-decoration:none'},'Back up or restore'))));
+  if(TEST)setTimeout(()=>{throw e;},0);}
+function faultNote(){if(FAULTED)return;FAULTED=true;try{app.prepend(el('p',{class:'fb warn',id:'faultbar',role:'alert'},'Something went wrong on this screen. Your saved answers are kept. If a button stops working, go back to the home screen and open the mission again.'));}catch(e){}}
+window.addEventListener('error',faultNote);window.addEventListener('unhandledrejection',faultNote);
+window.addEventListener('storage',e=>{if(e.key!==SKEY||e.newValue==null||SAVE_FAIL)return;const st=readStore();if(!st)return;const t=merge(st);BASE=snapOf(t);
+  const id=(location.hash||'#home').slice(1)||'home',a=document.activeElement;if((id==='home'||id==='report')&&!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))){const y=window.scrollY;route();window.scrollTo(0,y);}else try{updateProg();}catch(x){}});
 window.addEventListener('hashchange',route);route();
 </script>
 </body>

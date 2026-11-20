@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-MxYwLpbLmtx8cV8EHg9Ppi9Dp9HKBVllyVMUUAuCilc=' 'unsafe-inline' 'self'; style-src 'unsafe-inline'; img-src data: blob:; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AP Biology Cumulative Review</title>
 <style>
@@ -58,7 +59,11 @@ const FRQS=[{"u":1,"key":"frq","type":"Conceptual Analysis","tag":"Unit 1 · Top
 const UNITNAMES={1:'Chemistry of Life',2:'Cell Structure and Function',3:'Cellular Energetics',4:'Cell Communication and Cell Cycle',5:'Heredity',6:'Gene Expression and Regulation',7:'Natural Selection',8:'Ecology'};
 const SKILL={1:'Concept Explanation',2:'Visual Representations',3:'Questions and Methods',4:'Representing and Describing Data',5:'Statistical Tests and Data Analysis',6:'Argumentation'};
 const KEY='apbio-cumrev-v1',NQ=10,GAP=[6,13,27,55,90,90];
-const TEST=/[?&]test=1/.test(location.search);
+/* Test mode (answers exposed for scripted tests) works only from a local file or a local test server, and only with exactly
+   test=1. On the class website it is ignored. Test-mode progress is stored apart from real progress, and results codes made
+   in test mode are marked, so the Class Summary flags them. */
+const LOCAL=location.protocol==='file:'||/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const TEST=LOCAL&&/[?&]test=1(?:&|$)/.test(location.search);
 const $=s=>document.querySelector(s);
 function el(t,a,...k){const e=document.createElement(t);if(a)for(const x in a){if(a[x]==null)continue;if(x.startsWith('on'))e[x]=a[x];else e.setAttribute(x,a[x]);}for(const c of k.flat()){if(c==null||c===false)continue;e.append(c.nodeType?c:document.createTextNode(String(c)));}return e;}
 const pct=(f,t)=>t?Math.round(100*f/t):null,pc=v=>v==null?'–':v+'%';
@@ -71,11 +76,41 @@ function shuffle(a,r){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.flo
 const TOPRE=/\bTopics? ([0-9][0-9.]*)/,SKRE=/\bSP ([0-9][^·]*)/;
 function ptag(tag){const t=String(tag||''),p=TOPRE.exec(t),s=SKRE.exec(t);return[p?p[1]:'',s?s[1].split(/,\s*/).map(v=>v.trim()).filter(Boolean):[]];}
 /* ---------- storage ---------- */
-let ROOT;try{ROOT=JSON.parse(localStorage.getItem(KEY)||'null');}catch(e){ROOT=null;}
-if(!ROOT||!ROOT.users)ROOT={users:{},cur:''};
-function save(){try{localStorage.setItem(KEY,JSON.stringify(ROOT));}catch(e){}}
+/* Saved history: read with checks and repairs (data that cannot be read are copied aside, never silently dropped), names kept in
+   a map without a prototype, and written with a merge so two tabs do not erase each other's work: question history keeps the
+   record seen more often, finished sets are combined, and the set in progress is merged answer by answer. The student object
+   is updated in place. A failed write shows a warning. Test mode (?test=1, local only) uses its own store. */
+const SKEY=KEY+(TEST?'-test':'');let ROOT=null,SAVE_FAIL=false,DAMAGED=false,BASE={};
+const isObj=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+function dict(o){const d=Object.create(null);if(isObj(o))for(const k of Object.keys(o))d[k]=o[k];return d;}
+function normCU(u){if(!isObj(u))return null;const o={name:typeof u.name==='string'?u.name.slice(0,60):'',h:dict(),sets:[],units:[]};
+  if(isObj(u.h))for(const id of Object.keys(u.h)){const v=u.h[id];if(Array.isArray(v))o.h[id]=[+v[0]||0,String(v[1]==null?'':v[1]),+v[2]||0,+v[3]||0];}
+  if(Array.isArray(u.sets))o.sets=u.sets.filter(s=>isObj(s)&&Array.isArray(s.items)&&isObj(s.res)).slice(-60);
+  if(Array.isArray(u.units))o.units=u.units.map(Number).filter(n=>Number.isInteger(n)&&n>0&&n<100);
+  o.cur=isObj(u.cur)&&Array.isArray(u.cur.items)&&isObj(u.cur.res)?u.cur:null;
+  if(u.noconf)o.noconf=true;if(+u.bk>0)o.bk=+u.bk;if(+u.chg>0)o.chg=+u.chg;return o;}
+function normCRoot(o){if(!isObj(o)||!isObj(o.users))return null;const users=dict();for(const k of Object.keys(o.users)){const u=normCU(o.users[k]);if(u)users[k]=u;}return{users,cur:typeof o.cur==='string'&&users[o.cur]?o.cur:''};}
+function readStore(){let raw=null;try{raw=localStorage.getItem(SKEY);}catch(e){return null;}if(raw==null)return null;let o=null;try{o=JSON.parse(raw);}catch(e){}const R=normCRoot(o);
+  if(!R){DAMAGED=true;try{if(localStorage.getItem(SKEY+'-damaged')!==raw)localStorage.setItem(SKEY+'-damaged',raw);}catch(e){}}return R;}
+function snapU(u){return u?{cur:JSON.stringify(u.cur),units:JSON.stringify(u.units),name:JSON.stringify(u.name)}:{};}
+const setKey=s=>s.st?'t'+s.st:s.d+'|'+s.items.join(',');
+function merge(st,full){full=Array.isArray(full)?full:[];const cur=ROOT.cur;for(const k of Object.keys(st.users))if(k!==cur&&!full.includes(k))ROOT.users[k]=st.users[k];
+  const u=ROOT.users[cur],t=st.users[cur];if(!u||!t||full.includes(cur))return t||null;
+  for(const id of Object.keys(t.h)){const a=u.h[id],b=t.h[id];if(!a||b[2]>a[2]||(b[2]===a[2]&&b[1]>a[1]))u.h[id]=b;}
+  const have=new Set(u.sets.map(setKey));t.sets.forEach(s=>{if(!have.has(setKey(s)))u.sets.push(s);});
+  u.sets.sort((a,b)=>(a.st||Date.parse(a.d)||0)-(b.st||Date.parse(b.d)||0));if(u.sets.length>60)u.sets.splice(0,u.sets.length-60);
+  if(u.cur&&t.cur&&u.cur.start===t.cur.start){for(const id of Object.keys(t.cur.res))if(!(id in u.cur.res))u.cur.res[id]=t.cur.res[id];['frqKey','frqStart','frq'].forEach(f=>{if(u.cur[f]==null&&t.cur[f]!=null)u.cur[f]=t.cur[f];});}
+  else if(JSON.stringify(u.cur)===BASE.cur&&!(t.cur&&have.has('t'+t.cur.start)))u.cur=t.cur;
+  ['units','name'].forEach(f=>{if(JSON.stringify(u[f])===BASE[f])u[f]=t[f];});
+  ['bk','chg'].forEach(f=>{const v=Math.max(+u[f]||0,+t[f]||0);if(v)u[f]=v;});return t;}
+function save(full){const st=readStore();if(st)merge(st,full);let ok=true;try{localStorage.setItem(SKEY,JSON.stringify(ROOT));}catch(e){ok=false;}
+  if(ok===SAVE_FAIL){SAVE_FAIL=!ok;try{const old=document.getElementById('envwarn'),b=envBanner();if(old)old.remove();if(b)$('#main').prepend(b);}catch(e){}}
+  if(ok)BASE=snapU(U());return ok;}
 function U(){return ROOT.users[ROOT.cur]||null;}
-function setUser(n){const k=nameKey(n);if(!k)return;if(!ROOT.users[k])ROOT.users[k]={name:String(n).trim().replace(/\s+/g,' ').slice(0,60),h:{},sets:[],units:defaultUnits()};ROOT.cur=k;save();route();}
+ROOT=readStore()||{users:dict(),cur:''};BASE=snapU(U());
+function setUser(n){const k=nameKey(n);if(!k)return;let full=[];
+  if(!ROOT.users[k]){const st=readStore();if(st&&st.users[k])ROOT.users[k]=st.users[k];else{ROOT.users[k]={name:String(n).trim().replace(/\s+/g,' ').slice(0,60),h:dict(),sets:[],units:defaultUnits()};full=[k];}}
+  ROOT.cur=k;BASE=snapU(U());save(full);route();}
 function defaultUnits(){const m=/[?&]units=(\d)(?:-(\d))?/.exec(location.search);if(m){const a=+m[1],b=+(m[2]||m[1]),o=[];for(let i=a;i<=b;i++)o.push(i);return o;}return[1,2,3,4,5,6,7,8];}
 /* ---------- choosing a set ---------- */
 const BYID=Object.fromEntries(BANK.map(b=>[b.id,b]));
@@ -104,21 +139,28 @@ function touched(){const u=U();if(u){u.chg=Date.now();SESSION_WORK=true;}}
 const STORE_OK=(()=>{try{const k='__t'+KEY;localStorage.setItem(k,'1');const ok=localStorage.getItem(k)==='1';localStorage.removeItem(k);return ok;}catch(e){return false;}})();
 const UA=navigator.userAgent||'',IOS=/iPhone|iPad|iPod/.test(UA)||(/Macintosh/.test(UA)&&navigator.maxTouchPoints>1);
 const INAPP=(TEST&&/[?&]inapp=1/.test(location.search))||/FBAN|FBAV|Instagram|Line\/|MicroMessenger|wxwork|DingTalk|Lark|Feishu|Teams\/|Snapchat|Twitter|GSA\//i.test(UA)||(IOS&&/AppleWebKit/.test(UA)&&!/Safari\//.test(UA));
-try{if(navigator.storage&&navigator.storage.persist&&location.protocol!=='file:')navigator.storage.persist();}catch(e){}
+try{if(navigator.storage&&navigator.storage.persist&&location.protocol!=='file:')Promise.resolve(navigator.storage.persist()).catch(()=>{});}catch(e){}
 function envBanner(){let off=false;try{off=sessionStorage.getItem('__envok')==='1';}catch(e){}
   const msgs=[];if(!STORE_OK)msgs.push(['Your progress is not being saved in this browser.','This happens in a private window or when website data is blocked. Open the file in a normal window, or make a backup before you leave.']);
+  if(STORE_OK&&SAVE_FAIL)msgs.push(['Your latest answers could not be saved.','The browser refused to store them, perhaps because its storage for this site is full. Make a backup now, then close any other tabs of this page.']);
+  if(DAMAGED)msgs.push(['Saved progress in this browser could not be read.','It may have been damaged. A copy was kept on this device. If you have a backup, restore it now.']);
   if(INAPP)msgs.push(['You are in an app’s built-in viewer.','Progress made here can be lost when the app closes. Open this page in Safari or Chrome: use the app’s ⋯ or Share menu and choose Open in Safari or Open in browser.'+(location.protocol==='file:'?' If there is no such option, ask your teacher for the web link.':'')]);
-  if(!msgs.length||off&&STORE_OK)return null;
+  if(!msgs.length||off&&STORE_OK&&!SAVE_FAIL&&!DAMAGED)return null;
   const fb=el('p',{class:'fb',role:'status'}),row=el('div',{class:'row'});
   if(INAPP&&/^https?:$/.test(location.protocol))row.append(el('button',{class:'btn',type:'button',onclick(){const u=location.href.split('#')[0];(navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(u):Promise.reject()).then(()=>{fb.className='fb good';fb.textContent='Link copied. Open Safari or Chrome and paste it into the address bar.';},()=>{fb.className='fb warn';fb.textContent='Copy this link into Safari or Chrome: '+u;});}},'Copy the link'));
-  if(STORE_OK)row.append(el('button',{class:'btn alt',type:'button',onclick(){try{sessionStorage.setItem('__envok','1');}catch(e){}c.remove();}},'Hide this message'));
+  if(SAVE_FAIL||DAMAGED)row.append(el('a',{class:'btn',href:'#backup',style:'text-decoration:none'},'Back up or restore'));
+  if(STORE_OK&&!SAVE_FAIL)row.append(el('button',{class:'btn alt',type:'button',onclick(){try{sessionStorage.setItem('__envok','1');}catch(e){}c.remove();}},'Hide this message'));
   const c=el('section',{class:'card',id:'envwarn',role:'alert',style:'border:2px solid var(--bad)'},...msgs.map(([a,b])=>el('p',null,el('b',null,a),' '+b)),row,fb);return c;}
 function needsBackup(){const u=U();return !!(u&&u.chg&&(!u.bk||u.bk<u.chg));}
 function bkWhen(){const u=U();if(!u||!u.bk)return 'never';const d=new Date(u.bk),z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+' '+z(d.getHours())+':'+z(d.getMinutes());}
-async function decodeAs(pre,code){const m=new RegExp(pre+'([01])\\.([A-Za-z0-9_-]+)').exec(String(code).replace(/\s+/g,''));if(!m)throw new Error('none');
+/* Backups are size-limited before and while they are expanded, so a pasted code or a chosen file cannot freeze the page. */
+async function inflateCapped(u,max){const rd=new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader(),parts=[];let n=0;
+  for(;;){const r=await rd.read();if(r.done)break;n+=r.value.length;if(n>max){try{await rd.cancel();}catch(e){}throw new Error('big');}parts.push(r.value);}
+  const all=new Uint8Array(n);let o=0;for(const p of parts){all.set(p,o);o+=p.length;}return new TextDecoder().decode(all);}
+async function decodeAs(pre,code){code=String(code);if(code.length>2e6)throw new Error('big');const m=new RegExp(pre+'([01])\\.([A-Za-z0-9_-]+)').exec(code.replace(/\s+/g,''));if(!m)throw new Error('none');
   const s=m[2].replace(/-/g,'+').replace(/_/g,'/'),bin=atob(s+'==='.slice((s.length+3)%4)),u=Uint8Array.from(bin,c=>c.charCodeAt(0));
-  if(m[1]==='1'){if(!window.DecompressionStream)throw new Error('old');return JSON.parse(await new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text());}
-  return JSON.parse(new TextDecoder().decode(u));}
+  if(m[1]==='1'){if(!window.DecompressionStream)throw new Error('old');return JSON.parse(await inflateCapped(u,8e6));}
+  if(u.length>8e6)throw new Error('big');return JSON.parse(new TextDecoder().decode(u));}
 function backupRow(){const n=needsBackup();return el('div',{class:'row'},el('a',{class:'btn'+(n?'':' alt'),href:'#backup'},n?'Back up my progress':'Back up or restore'),el('span',{class:'note'},'Last backup: '+bkWhen()+(n?'. You have progress since then.':'.')));}
 function backupPage(m){const u=U();const o={v:1,k:KEY,n:u.name,d:today(),U:Object.assign({},u,{cur:null})};delete o.U.bk;delete o.U.chg;o.h=fnv('bk|'+JSON.stringify(o));
   const ta=el('textarea',{class:'codebox',readonly:'readonly','aria-label':'Backup code',id:'bkcode'},'Preparing…'),fb=el('p',{class:'fb',role:'status'});let code='';
@@ -127,21 +169,21 @@ function backupPage(m){const u=U();const o={v:1,k:KEY,n:u.name,d:today(),U:Objec
   const dlB=el('button',{class:'btn alt',type:'button',onclick(){const a=el('a',{href:URL.createObjectURL(new Blob([code+'\n'],{type:'text/plain'})),download:'Cumulative_backup_'+(u.name||'student').replace(/[^A-Za-z0-9]+/g,'_')+'_'+today()+'.txt'});document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},800);done();fb.className='fb good';fb.textContent='Saved as a file. On an iPad or phone it is in the Files app, in Downloads.';}},'Save backup as a file');
   m.append(el('section',{class:'card'},el('h2',null,'Back up my progress'),el('p',null,'Student: '+u.name+'. Last backup: '+bkWhen()+'.'),el('p',null,'Your review history is saved in this browser only. A browser can delete it: when a private window is closed or the browser quits, when website data is cleared, if Safari is not used with this page for about a week, or if you change device. A backup lets you get it back.'),ta,el('div',{class:'row noprint'},copyB,dlB),fb));
   const rin=el('textarea',{class:'codebox','aria-label':'Paste a backup code',id:'bkin',placeholder:'Paste a backup code (it starts with BK1. or BK0.)'}),fin=el('input',{type:'file',accept:'.txt,text/plain',id:'bkfile'}),rfb=el('p',{class:'fb',role:'status'});let armed=null;
-  fin.addEventListener('change',async()=>{const f=fin.files[0];if(f)rin.value=await f.text();});
+  fin.addEventListener('change',async()=>{const f=fin.files[0];if(!f)return;if(f.size>2e6){rfb.className='fb bad';rfb.textContent='That file is far too large to be a backup from this page.';return;}rin.value=await f.text();});
   m.append(el('section',{class:'card'},el('h2',null,'Restore from a backup'),el('p',null,'Paste a backup code, or choose a backup file, then tap Restore.'),rin,el('div',{class:'row'},el('label',{for:'bkfile',class:'note'},'Backup file: ',fin)),el('div',{class:'row'},el('button',{class:'btn',type:'button',async onclick(){restore(rin.value,rfb,armed,v=>armed=v);}},'Restore')),rfb),el('div',{class:'row'},el('a',{class:'btn alt',href:'#home'},'Back')));}
-async function restore(txt,rfb,armed,arm){let o;try{o=await decodeAs('BK',txt);}catch(e){rfb.className='fb bad';rfb.textContent=e.message==='old'?'This browser cannot read compressed backups. Restore in an up-to-date browser.':'That is not a complete backup code. Copy all of it, or choose the backup file.';return;}
+async function restore(txt,rfb,armed,arm){let o;try{o=await decodeAs('BK',txt);}catch(e){rfb.className='fb bad';rfb.textContent=e.message==='big'?'That is far too long to be a backup code from this page.':e.message==='old'?'This browser cannot read compressed backups. Restore in an up-to-date browser.':'That is not a complete backup code. Copy all of it, or choose the backup file.';return;}
   if(o.k!==KEY){rfb.className='fb bad';rfb.textContent='This backup is from a different file. Open that file to restore it.';return;}
   const h=o.h;delete o.h;if(fnv('bk|'+JSON.stringify(o))!==h){rfb.className='fb bad';rfb.textContent='This backup code has been changed, so it cannot be restored.';return;}
   const k=nameKey(o.n),ex=ROOT.users[k];if(ex&&ex.sets&&ex.sets.length&&armed!==txt){arm(txt);rfb.className='fb warn';rfb.textContent='This device already has a history for '+o.n+'. Tap Restore again to replace it with the backup from '+o.d+'.';return;}
-  ROOT.users[k]=Object.assign(o.U,{bk:Date.now()});ROOT.cur=k;save();try{sessionStorage.setItem('__flash','Restored the backup from '+o.d+' for '+o.n+'.');}catch(e){}if(location.hash==='#home')route();else location.hash='home';}
-window.addEventListener('beforeunload',e=>{if(TEST&&!/[?&]leave=1/.test(location.search))return;if(!SESSION_WORK)return;if(!STORE_OK||needsBackup()){e.preventDefault();e.returnValue='';return'';}});
+  const CU=normCU(Object.assign({},o.U,{name:o.n,bk:Date.now()}));if(!CU){rfb.className='fb bad';rfb.textContent='That is not a complete backup code. Copy all of it, or choose the backup file.';return;}CU.cur=null;ROOT.users[k]=CU;ROOT.cur=k;BASE=snapU(CU);save([k]);try{sessionStorage.setItem('__flash','Restored the backup from '+o.d+' for '+o.n+'.');}catch(e){}if(location.hash==='#home')route();else location.hash='home';}
+window.addEventListener('beforeunload',e=>{if(TEST&&!/[?&]leave=1/.test(location.search))return;if(!SESSION_WORK)return;if(!STORE_OK||SAVE_FAIL||needsBackup()){e.preventDefault();e.returnValue='';return'';}});
 const ON_WEB=/^https?:$/.test(location.protocol);
 function courseLink(){return ON_WEB?el('a',{class:'btn alt',href:'./'},'Course home'):null;}
 function route(){const h=location.hash.slice(1)||'home',m=$('#main');m.innerHTML='';window.scrollTo(0,0);const b=envBanner();if(b)m.append(b);
   let fl=null;try{fl=sessionStorage.getItem('__flash');sessionStorage.removeItem('__flash');}catch(e){}if(fl)m.append(el('p',{class:'fb good',role:'status'},fl));
   if(!U()&&h!=='home'&&h!=='backup'){location.hash='home';return;}
-  if(h==='backup'){if(U())return backupPage(m);return restoreOnly(m);}
-  if(h==='set')return setScreen(m);if(h==='report')return report(m);return home(m);}
+  FAULTED=false;try{if(h==='backup'){if(U())return backupPage(m);return restoreOnly(m);}
+  if(h==='set')return setScreen(m);if(h==='report')return report(m);return home(m);}catch(e){showFault(m,e);}}
 function restoreOnly(m){const rin=el('textarea',{class:'codebox','aria-label':'Paste a backup code',id:'bkin'}),rfb=el('p',{class:'fb',role:'status'});let armed=null;m.append(el('section',{class:'card'},el('h2',null,'Restore from a backup'),rin,el('div',{class:'row'},el('button',{class:'btn',type:'button',onclick(){restore(rin.value,rfb,armed,v=>armed=v);}},'Restore')),rfb));}
 window.onhashchange=route;
 function home(m){
@@ -186,7 +228,7 @@ function frqOffer(m){const u=U(),S=u.cur;
     el('div',{class:'row'},F?el('button',{class:'btn',type:'button',onclick(){S.frqKey=F.u+F.key;S.frqStart=Date.now();save();route();}},'Do the FRQ'):null,el('button',{class:F?'btn alt':'btn',type:'button',onclick(){finishSet();}},F?'Skip the FRQ and finish':'Finish'))));}
 function frqScreen(m){const u=U(),S=u.cur,F=FRQS.find(x=>x.u+x.key===S.frqKey);if(!F){finishSet();return;}
   const clock=el('span');const tick=()=>{const left=600-Math.round((Date.now()-S.frqStart)/1000);clock.textContent=(left<0?'Over time by ':'Time left: ')+Math.floor(Math.abs(left)/60)+':'+String(Math.abs(left)%60).padStart(2,'0');};tick();TIMER=setInterval(tick,1000);
-  const L='ABCDEFGHIJ',parts=F.parts.map((p,i)=>{const ta=el('textarea',{'aria-label':'Answer to part '+L[i],'data-part':i});return{p,ta};});
+  const L='ABCDEFGHIJ',parts=F.parts.map((p,i)=>{const ta=el('textarea',{'aria-label':'Answer to part '+L[i],'data-part':i});if(Array.isArray(S.dr)&&typeof S.dr[i]==='string')ta.value=S.dr[i].slice(0,20000);let tm=null;ta.addEventListener('input',()=>{clearTimeout(tm);tm=setTimeout(()=>{S.dr=parts.map(x=>x.ta.value);save();},500);});return{p,ta};});
   const guide=el('div'),fb=el('p',{class:'fb',role:'status'});
   const open=el('button',{class:'btn',type:'button',onclick(){open.disabled=true;if(TIMER)clearInterval(TIMER);parts.forEach(x=>x.ta.readOnly=true);showGuide();}},'Open the scoring guide');
   function showGuide(){let calR=0,calT=0;const judged=parts.map(()=>[null,null]),got=parts.map(()=>null);
@@ -204,7 +246,7 @@ function frqScreen(m){const u=U(),S=u.cur,F=FRQS.find(x=>x.u+x.key===S.frqKey);i
   m.append(el('section',{class:'card'},el('div',{class:'prog'},el('span',null,'Free response · '+F.type),clock),el('p',{class:'tag'},F.tag),...F.stem.map(s=>el('p',null,s)),
     ...parts.map(({p,ta},i)=>el('div',{class:'part'},el('p',null,el('b',null,'('+L[i]+') '),el('b',null,p.v),' '+p.q),ta)),el('div',{class:'row'},open),guide));}
 function finishSet(){const u=U(),S=u.cur;if(!S)return;touched();if(TIMER)clearInterval(TIMER);
-  u.sets.push({d:S.d,units:[...new Set(S.items.map(id=>BYID[id]&&BYID[id].u).filter(Boolean))].sort(),items:S.items,res:S.res,frq:S.frq||null,sec:Math.round((Date.now()-S.start)/1000)});
+  u.sets.push({d:S.d,st:S.start,units:[...new Set(S.items.map(id=>BYID[id]&&BYID[id].u).filter(Boolean))].sort(),items:S.items,res:S.res,frq:S.frq||null,sec:Math.round((Date.now()-S.start)/1000)});
   if(u.sets.length>60)u.sets.splice(0,u.sets.length-60);u.cur=null;save();location.hash='report';}
 /* ---------- results ---------- */
 function bars(head,rows){return el('div',{class:'scroll'},el('table',null,el('thead',null,el('tr',null,head.map(h=>el('th',null,h)))),el('tbody',null,rows.map(([a,f,t])=>{const p=pct(f,t);return el('tr',null,el('td',null,a),el('td',{class:'num'},f+' / '+t),el('td',null,el('div',{class:'bf'},el('div',{class:'bk',style:'width:'+(p||0)+'%'}))),el('td',{class:'num'},pc(p)));}))));}
@@ -245,11 +287,17 @@ function codeData(){const u=U(),d=today(),m={};let F=0,T=0;
     for(const k in s.res)q[k]=[s.res[k][0],s.res[k][1],0,s.res[k][2]==null?-1:s.res[k][2]];
     const o={a:[[s.d,f,t,s.frq?s.frq.pts:0,s.frq?s.frq.max:0]],s:q,f:{},l:{},c:{},o:0};
     if(s.frq){s.frq.parts.forEach((v,i)=>{q['frq'+'ABCDEFGHIJ'[i]]=[v,-1,0,-1];});o.f.frq=s.frq.v||[];o.c.frq=s.frq.cal;}m[id]=o;});
-  const out={v:2,k:KEY,u:'C',n:u.name,d,c:checkCode(u.name,d,Object.keys(m).length,pct(F,T)||0),m};out.h=fnv('apbio-rm|'+JSON.stringify(out));return out;}
+  const out={v:2,k:KEY,u:'C',n:u.name,d,t:new Date().toISOString(),c:checkCode(u.name,d,Object.keys(m).length,pct(F,T)||0),m};if(TEST)out.x=1;out.h=fnv('apbio-rm|'+JSON.stringify(out));return out;}
 async function encode(obj){let b=new TextEncoder().encode(JSON.stringify(obj)),z='0';
   try{if(window.CompressionStream){b=new Uint8Array(await new Response(new Blob([b]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());z='1';}}catch(e){}
   let bin='';for(let i=0;i<b.length;i++)bin+=String.fromCharCode(b[i]);return'RM'+z+'.'+btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
 if(!ON_WEB)document.querySelectorAll('.coursehome').forEach(e=>e.remove());
+/* When something goes wrong: a message instead of a blank page. Another tab saved: take its changes in. */
+let FAULTED=false;
+function showFault(m,e){m.append(el('section',{class:'card'},el('h2',null,'Something went wrong on this screen'),el('p',null,'Your saved history has not been changed. Go back to Review home and try again. If it happens again, make a backup and tell your teacher.'),el('p',{class:'note'},'Details: '+String(e&&e.message||e).slice(0,200)),el('div',{class:'row'},el('a',{class:'btn',href:'#home'},'Review home'),el('a',{class:'btn alt',href:'#backup'},'Back up or restore'))));if(TEST)setTimeout(()=>{throw e;},0);}
+function faultNote(){if(FAULTED)return;FAULTED=true;try{$('#main').prepend(el('p',{class:'fb warn',id:'faultbar',role:'alert'},'Something went wrong on this screen. Your saved answers are kept. If a button stops working, go back to Review home.'));}catch(e){}}
+window.addEventListener('error',faultNote);window.addEventListener('unhandledrejection',faultNote);
+window.addEventListener('storage',e=>{if(e.key!==SKEY||e.newValue==null||SAVE_FAIL)return;const st=readStore();if(!st)return;const t=merge(st);BASE=snapU(t);const h=location.hash.slice(1)||'home',a=document.activeElement;if((h==='home'||h==='report')&&!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))){const y=window.scrollY;route();window.scrollTo(0,y);}});
 route();
 </script>
 </body>
